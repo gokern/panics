@@ -1,0 +1,28 @@
+# Hidden entries at the repo root (dotfiles/dotdirs): ignore by default,
+# then allow the dotfiles we actually want to track.
+/.[!.]*
+/.?*
+!/.gitignore
+!/.golangci.yaml
+!/.github/
+
+# Agent state, at any depth. The rules above only deny dotdirs at the top of
+# the tree, so one under a subdirectory stays untracked-but-committable —
+# which is how agent state ends up inside a published module.
+**/.omc/
+
+# Go build / test artifacts
+*.exe
+*.test
+*.out
+*.prof
+coverage.*
+/bin/
+/dist/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
