@@ -9,6 +9,8 @@ import (
 )
 
 // These benchmarks measure the cost claims the package documentation makes.
+// BENCHMARKS.md holds a run of them: the numbers, the machine they came off,
+// and how to get them again.
 
 // Sinks keep the benchmarked results from being optimised away without adding a
 // per-iteration assignment the compiler could hoist.
@@ -60,9 +62,9 @@ func BenchmarkCatch_panicRendered(b *testing.B) {
 // So the capture gets slower as the stack deepens while the saving on the render
 // stays flat, and the two net out somewhere around here. Against
 // BenchmarkCatch_panicRendered, where the trim leaves one frame of seven and the
-// pair together come out a third cheaper, this one leaves 34 of 40 and comes out
+// pair together come out clearly ahead, this one leaves 34 of 40 and comes out
 // level. Reading either number on its own gives the wrong impression of the
-// trade, which is why both exist.
+// trade, which is why both exist; BENCHMARKS.md has the numbers themselves.
 func BenchmarkCatch_panicDeepStackRendered(b *testing.B) {
 	for b.Loop() {
 		frameSink = render(b, panics.Catch(func() { raiseAtDepth(32) }))

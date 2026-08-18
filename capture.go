@@ -108,8 +108,8 @@ func Recover(recovered any) *Panic {
 // contained is Recover for this package's own guards, the ones that put a frame
 // of catch.go on the stack below the panic. Only they can be trimmed at the
 // bottom, so only they pay for looking: an unassisted Recover would scan the
-// whole stack to conclude there is no boundary, which measured as a third of the
-// recover cost for nothing.
+// whole stack to conclude there is no boundary, which costs a noticeable part of
+// a recover and finds nothing. BENCHMARKS.md prices it.
 //
 // It carries no nil check of its own. Its one caller has already decided that a
 // panic happened, and a nil value does not mean "no panic" there the way it does
@@ -237,13 +237,14 @@ func panicSite(pcs []uintptr) int {
 // a Catch needs the innermost.
 //
 // That cost grows with depth while what it buys does not: the trim removes the
-// same six frames whatever the stack looked like. Measured on an idle
-// linux/amd64 box, a shallow panic pays 14% more to capture and reads back 83%
-// cheaper, netting 35% for a caller who renders the stack; at depth 32 it is 38%
-// more to capture against 23% cheaper to read, which nets out to nothing.
+// same six frames whatever the stack looked like. So a shallow panic pays a
+// little more to capture and reads back much cheaper, coming out ahead for a
+// caller who renders the stack, while by depth 32 the extra scanning has caught
+// up with the shorter render and the two net out level.
 // BenchmarkCatch_panicRendered and BenchmarkCatch_panicDeepStackRendered are the
-// pair that says so, and a caller who only checks for a panic and discards it
-// sees the capture side alone.
+// pair that says so, BENCHMARKS.md has what they said and on what machine, and a
+// caller who only checks for a panic and discards it sees the capture side
+// alone.
 func containmentSite(pcs []uintptr, anchor string) int {
 	for i, pc := range pcs {
 		site := pc - 1
