@@ -12,8 +12,8 @@
   <img src="img/preview.png" alt="panics: recovered panics for Go" width="900">
 </p>
 
-The minimal representation of a recovered panic, shared by every gokern package
-that runs code it did not write.
+The minimal representation of a recovered panic, for a package that runs code it
+did not write.
 
 ## Install
 
@@ -57,8 +57,9 @@ happened.
 - **No caller-dependent skip constant.** The stack is trimmed by locating
   `runtime.gopanic`, so the capture works at any nesting depth between a
   caller's deferred function and `Recover`.
-- **Frozen v1.** Several modules use this type as a shared `errors.As` target,
-  so a v2 would split the dependency graph. The API grows only additively.
+- **Frozen v1.** The type is meant to be a shared `errors.As` target, and a v2
+  would split the dependency graph as soon as two modules disagree about which
+  one to depend on. The API grows only additively.
 
 ## API
 
@@ -75,6 +76,38 @@ One rule is worth repeating outside the godoc, because nothing in a build or a
 passing test catches it: the `recover()` builtin must be called *directly* by the
 deferred function. A frame deeper it returns `nil`, `Recover` returns `nil` with
 it, and the panic keeps unwinding.
+
+## Adopting this in a package
+
+The conventions the `gokern` packages are written to, so that a consumer learns
+the panic vocabulary once instead of once per dependency.
+
+**Import it, do not re-export it.** `panics.Is(err)` answers "did anything
+panic", `panics.As(err)` reaches the value and the stack, and both stay under this
+module's name. A local name for the same value reads as "a function *this package*
+was handed panicked" while matching a panic contained anywhere in the error,
+including one the caller's own code recovered and reported as an ordinary failure.
+A package whose errors can carry a `*Panic` has this module in its public surface
+regardless, so there is no import to save.
+
+**A sentinel of your own wraps this one rather than replacing it.** Join the two
+with `fmt.Errorf("%w: %w", ErrYours, err)` and both questions keep an answer. A
+sentinel that stands in place of this one reads the same at the call site and
+silently switches off `panics.Is` and `panics.As` for everyone downstream.
+
+You will probably not need one. None of the `gokern` packages kept a sentinel of
+their own: `outboxer` shipped `ErrPublishPanicked` and `ErrCallbackPanicked` and
+removed both in 0.4.0, because where the panic arrived already said which
+function raised it. A task group that recovers at several points, and whose only
+question afterwards is what to retain past shutdown, has even less to name — it
+asks `panics.Is` and stops there.
+
+**Filter on `panics.Is`.** `ErrPanic` is exported so that `errors.Is` answers
+correctly on a panic somebody wrapped by hand, not as the way to ask the question.
+It is a `var`: a package that copies it into a sentinel of its own is holding a
+second mutable slot pointing at one value, and the two are one assignment apart
+from disagreeing. `panics.Is(err)` asks through a function instead — nothing to
+copy, nothing to let drift, and the sentinel stays on this side of the import.
 
 ## Scope
 
