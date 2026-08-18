@@ -1,8 +1,8 @@
 // Package panics is the minimal representation of a recovered panic.
 //
 // A library that runs code it did not write has to decide what a panic in that
-// code becomes. This package holds the answer every gokern package shares: what
-// was passed to panic, and where it happened.
+// code becomes. This package holds one answer for all of them to share: what was
+// passed to panic, and where it happened.
 //
 //	if err := panics.Catch(userCallback); err != nil {
 //	    // errors.Is(err, panics.ErrPanic) holds.
@@ -17,6 +17,7 @@
 // Rendering belongs to an error-wrapping library. Classifying a panic and naming
 // its site belong to whoever caught it.
 //
-// Several modules use [Panic] as a shared errors.As target, so a v2 would split
-// the dependency graph. The v1 API is frozen and grows only additively.
+// [Panic] is meant to be a shared errors.As target, and a v2 would split the
+// dependency graph between the modules reaching for it. The v1 API is frozen and
+// grows only additively.
 package panics

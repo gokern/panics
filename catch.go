@@ -1,5 +1,39 @@
 package panics
 
+import "runtime"
+
+// catchFile is this file's path as the compiler recorded it, and it anchors the
+// bottom trim the way runtime.gopanic anchors the top: a frame from here is
+// containment machinery, not a step the panic took on its way out.
+//
+// This file and no other. Recover, contained and capture live in capture.go and
+// always sit above gopanic, so the top trim has already dropped them; the only
+// frames of ours that can appear below the panic site are Catch, CatchError, and
+// the closure between them, all three declared here.
+//
+// Matched on the file rather than the function name, because the name does not
+// identify us: Catch hands CatchError a closure the compiler attributes to
+// whoever called Catch, spelled "yourpkg.YourFunc.Catch.func1". A name test
+// walks straight past the frame that marks the boundary. The file is catch.go
+// either way.
+//
+// Read from runtime.Caller rather than written down, so it survives -trimpath
+// (which rewrites this path and the frames' paths identically), a module rename,
+// and vendoring. Compared exactly, not by directory, so the package's own tests
+// — which sit in the same directory and do the panicking — are not mistaken for
+// machinery. Empty only if the runtime declines to answer, which capture reads
+// as noAnchor and answers by not trimming the bottom at all.
+//
+//nolint:gochecknoglobals // one compiler-supplied constant, resolved once.
+var catchFile = func() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return ""
+	}
+
+	return file
+}()
+
 // Catch runs fn and contains a panic raised by it, returning the panic as an
 // error or nil:
 //
@@ -38,19 +72,15 @@ func CatchError(fn func() error) (err error) {
 	defer func() {
 		recovered := recover()
 
-		p := Recover(recovered)
-		if p != nil {
-			err = p
-
+		// A nil value with fn having returned is the only clean run. A nil value
+		// with fn never returning is a panic(nil) under panicnil=1: the recover
+		// above already consumed it, so reporting it here is the only way it is
+		// not lost without trace.
+		if recovered == nil && completed {
 			return
 		}
 
-		if !completed {
-			// recover() yielded nil yet fn never returned: a panic(nil) under
-			// panicnil=1. The recover above already consumed it, so reporting it
-			// here is the only way it is not lost without trace.
-			err = &Panic{Value: recovered, stack: capture()}
-		}
+		err = contained(recovered)
 	}()
 
 	err = fn()

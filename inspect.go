@@ -25,6 +25,17 @@ func Is(err error) bool {
 // nil-derefs on the very first Value read. The walk then carries on past the typed
 // nil to whatever else the chain holds, because a caller told by Is that the error
 // is a panic must be able to reach that panic through As.
+//
+// The walk follows Unwrap() error and Unwrap() []error, and those only. A wrapper
+// that offers no Unwrap and reaches its cause solely through an As(any) bool
+// method of its own is therefore opaque here. It is equally opaque to Is, since
+// errors.Is does not consult that hook either. errors.As sees straight through it;
+// both of this package's questions answer false.
+//
+// Honouring the hook would mean delegating the match, which is the thing the
+// paragraph above exists to avoid: whatever the hook hands back is reported, typed
+// nil included. A wrapper that provides Unwrap alongside its hook, as almost all
+// do, is walked normally.
 func As(err error) (*Panic, bool) {
 	// The assertions below are deliberately concrete rather than errors.As or
 	// errors.AsType: this function *is* the walk, and delegating the match to one

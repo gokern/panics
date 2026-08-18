@@ -33,9 +33,10 @@ type Panic struct { //nolint:errname // frozen v1 name; see the package doc.
 	stack []uintptr
 }
 
-// Every method below tolerates a nil receiver. Other modules use this type as a
-// shared errors.As target (see the package doc), so a typed-nil *Panic can end up
-// in a chain built by code this package never sees, and both walks that matter
+// Every method below tolerates a nil receiver. This type is meant to be a shared
+// errors.As target across modules (see the package doc), so a typed-nil *Panic
+// can end up in a chain built by code this package never sees, and both walks that
+// matter
 // visit every node of one: errors.Is calls Unwrap on each, sentry-go's
 // convertErrorDFS calls Error on each. A nil receiver has to be inert in both
 // rather than a crash far from its cause. [As] refuses a typed nil for the same
@@ -54,6 +55,37 @@ func (p *Panic) Error() string {
 
 // StackTrace returns the program counters of the frames the panic came from,
 // innermost first, ready for runtime.CallersFrames.
+//
+// The frames the panic came from, and no others: the runtime's way into the
+// panic is trimmed off the top, and this package's way out of it off the bottom,
+// along with the caller's own stack below that. So a stack caught by Catch or
+// CatchError starts at the line that called panic and ends at the last frame the
+// panic actually unwound through. It does not lead with runtime.gopanic, and it
+// carries no Catch, no testing.tRunner, no runtime.goexit. A caller who wants
+// their own call site already has it, and an error-wrapping library on top
+// renders it from its own wrap sites.
+//
+// That promise covers the top of the stack only. The trim removes the runtime's
+// entry into the panic being reported, not every gopanic on it. A deferred
+// function that panics while its own function is already unwinding
+// leaves the first panic's gopanic below the second one's frames, and that frame
+// is a step the panic really took, so it is retained, in the middle.
+//
+// The trim at the bottom is the one that stands down, and two shapes make it do
+// so. Recover used in a hand-written deferred function is one: nothing of this
+// package sits below the panic there, and only the caller knows where their own
+// guard begins, so the stack runs from the panic site to the bottom of the
+// goroutine. A panic raised inside the guard itself is the other. Catch(nil)
+// faults on the call to fn, so the boundary is the panic site, and cutting there
+// would leave the runtime's fault frames and nothing naming whoever passed the
+// nil; the stack then runs from those fault frames to the bottom instead.
+//
+// The trim at the top is unaffected by either and keeps running, so neither of
+// those two leads with runtime.gopanic. It has one stand-down of its own, and it
+// is a third shape rather than a case of these. A deferred chain long enough to
+// fill the capture window leaves the panic site outside it, and with nothing to
+// trim to the whole window is kept, gopanic included, at the end of it. See
+// panicSite. Expect that stack to describe the recovery rather than the panic.
 //
 // The name and signature are the ones sentry-go looks up by reflection, so panic
 // frames reach an APM dashboard without this package depending on any SDK.

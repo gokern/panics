@@ -21,15 +21,6 @@ var (
 	errPanicSink *panics.Panic
 )
 
-//go:noinline
-func raiseAtDepth(n int) {
-	if n == 0 {
-		panic("boom")
-	}
-
-	raiseAtDepth(n - 1)
-}
-
 // The price every caller pays on every call, panic or not. It must stay free of a
 // capture.
 func BenchmarkCatch_noPanic(b *testing.B) {
@@ -59,27 +50,49 @@ func BenchmarkCatch_panicDeepStack(b *testing.B) {
 // is what a caller who checks a panic and discards it never pays.
 func BenchmarkCatch_panicRendered(b *testing.B) {
 	for b.Loop() {
-		err := panics.Catch(raise)
-
-		p, ok := panics.As(err)
-		if !ok {
-			b.Fatal("Catch must report the panic")
-		}
-
-		frames := runtime.CallersFrames(p.StackTrace())
-		count := 0
-
-		for {
-			frame, more := frames.Next()
-			count += len(frame.Function)
-
-			if !more {
-				break
-			}
-		}
-
-		frameSink = count
+		frameSink = render(b, panics.Catch(raise))
 	}
+}
+
+// The deep-stack counterpart to the two above, and the one that says whether the
+// bottom trim pays for itself. The trim removes the same handful of frames at any
+// depth, but it costs a FileLine per frame between the panic site and the guard.
+// So the capture gets slower as the stack deepens while the saving on the render
+// stays flat, and the two net out somewhere around here. Against
+// BenchmarkCatch_panicRendered, where the trim leaves one frame of seven and the
+// pair together come out a third cheaper, this one leaves 34 of 40 and comes out
+// level. Reading either number on its own gives the wrong impression of the
+// trade, which is why both exist.
+func BenchmarkCatch_panicDeepStackRendered(b *testing.B) {
+	for b.Loop() {
+		frameSink = render(b, panics.Catch(func() { raiseAtDepth(32) }))
+	}
+}
+
+// render walks every retained frame and resolves its name, which is the work an
+// APM SDK does with the stack and the work the lazy capture defers until someone
+// asks. Summing the name lengths is just a use the compiler cannot elide.
+func render(b *testing.B, err error) int {
+	b.Helper()
+
+	p, ok := panics.As(err)
+	if !ok {
+		b.Fatal("Catch must report the panic")
+	}
+
+	frames := runtime.CallersFrames(p.StackTrace())
+	count := 0
+
+	for {
+		frame, more := frames.Next()
+		count += len(frame.Function)
+
+		if !more {
+			break
+		}
+	}
+
+	return count
 }
 
 // The shape the unbounded gopanic scan is for: a deferred function that hands the

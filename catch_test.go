@@ -48,9 +48,6 @@ func TestCatchError_containsThePanic(t *testing.T) {
 	require.EqualError(t, err, "panic: boom")
 }
 
-//go:noinline
-func raiseNil() { panic(nil) }
-
 func TestCatchError_containsAPanicWithANilValue(t *testing.T) {
 	// No t.Parallel here: t.Setenv forbids it, because GODEBUG is process-wide.
 	//
@@ -70,9 +67,9 @@ func TestCatchError_containsAPanicWithANilValue(t *testing.T) {
 	require.True(t, ok)
 	require.Nil(t, p.Value, "the value recover() yielded is reported as it was")
 
-	frame := topFrame(t, p)
-	require.True(t, strings.HasSuffix(frame.Function, ".raiseNil"),
-		"the fabricated capture must still point at the panic site, got %q", frame.Function)
+	top := topFrameName(t, p)
+	require.True(t, strings.HasSuffix(top, ".raiseNil"),
+		"the fabricated capture must still point at the panic site, got %q", top)
 
 	// The other half: the completion flag must not turn a clean run into a panic.
 	// Without this, a fix for the above could report every success as a
@@ -83,7 +80,7 @@ func TestCatchError_containsAPanicWithANilValue(t *testing.T) {
 	require.ErrorIs(t, panics.CatchError(func() error { return sentinel }), sentinel)
 }
 
-func TestIs(t *testing.T) {
+func TestIs_matchesAPanicAndNothingElse(t *testing.T) {
 	t.Parallel()
 
 	require.True(t, panics.Is(panics.Catch(func() { panic("boom") })))
@@ -91,7 +88,7 @@ func TestIs(t *testing.T) {
 	require.False(t, panics.Is(nil))
 }
 
-func TestAs(t *testing.T) {
+func TestAs_reachesTheValueOnlyForAPanic(t *testing.T) {
 	t.Parallel()
 
 	err := panics.Catch(func() { panic("boom") })
@@ -227,16 +224,12 @@ func TestAs_reportsTheOutermostPanic(t *testing.T) {
 func TestCatch_stackReachesThePanicSite(t *testing.T) {
 	t.Parallel()
 
-	err := panics.Catch(raise)
+	top := caughtFrameNames(t, panics.Catch(raise))[0]
 
-	p, ok := panics.As(err)
-	require.True(t, ok)
-
-	frame := topFrame(t, p)
-	require.True(t, strings.HasSuffix(frame.Function, ".raise"),
-		"the gopanic scan must reach the panic site through Catch's frames, got %q", frame.Function)
-	require.False(t, strings.HasPrefix(frame.Function, "runtime."),
-		"got %q", frame.Function)
+	require.True(t, strings.HasSuffix(top, ".raise"),
+		"the gopanic scan must reach the panic site through Catch's frames, got %q", top)
+	require.False(t, strings.HasPrefix(top, "runtime."),
+		"got %q", top)
 }
 
 // Exercises capture's gopanic-not-found path, which is documented behaviour: with
@@ -245,21 +238,19 @@ func TestCatch_stackReachesThePanicSite(t *testing.T) {
 func TestRecover_outsideAPanicRetainsTheCallerStack(t *testing.T) {
 	t.Parallel()
 
-	p := panics.Recover("not actually a panic")
-
-	frame := topFrame(t, p)
+	top := topFrameName(t, panics.Recover("not actually a panic"))
 
 	// The expected frame is named rather than gopanic merely ruled out, because
 	// no gopanic is on this stack at all: an assertion against it would hold
 	// whatever the fallback retained, panics.capture included. This is also the
-	// one assertion that pins capture's skipSelf, which has no gopanic to
-	// re-anchor on here if the count is wrong.
+	// one assertion that pins capture's skipSelf from outside the package, which
+	// has no gopanic to re-anchor on here if the count is wrong.
 	require.True(
 		t,
-		strings.HasSuffix(frame.Function, ".TestRecover_outsideAPanicRetainsTheCallerStack"),
+		strings.HasSuffix(top, ".TestRecover_outsideAPanicRetainsTheCallerStack"),
 		"the fallback must retain the caller's stack, starting at the caller, got %q",
-		frame.Function,
+		top,
 	)
-	require.NotContains(t, frame.Function, "gokern/panics.",
-		"the fallback must not lead with this package's own frames, got %q", frame.Function)
+	require.NotContains(t, top, "gokern/panics.",
+		"the fallback must not lead with this package's own frames, got %q", top)
 }

@@ -11,8 +11,10 @@ import (
 	"github.com/gokern/panics"
 )
 
-// topFrame resolves the first retained frame of p's stack.
-func topFrame(t *testing.T, p *panics.Panic) runtime.Frame {
+// frameNames names every frame p retained, innermost first. Names are all these
+// tests read of a frame. Resolving them once here keeps the assertions about
+// stack shape from having to be written as loops.
+func frameNames(t *testing.T, p *panics.Panic) []string {
 	t.Helper()
 
 	require.NotNil(t, p, "a recovered panic must produce a *Panic")
@@ -20,13 +22,39 @@ func topFrame(t *testing.T, p *panics.Panic) runtime.Frame {
 	stack := p.StackTrace()
 	require.NotEmpty(t, stack, "a recovered panic must carry frames")
 
-	frame, _ := runtime.CallersFrames(stack).Next()
+	var (
+		names  []string
+		frames = runtime.CallersFrames(stack)
+	)
 
-	return frame
+	for {
+		frame, more := frames.Next()
+		names = append(names, frame.Function)
+
+		if !more {
+			break
+		}
+	}
+
+	return names
 }
 
-//go:noinline
-func raise() { panic("boom") }
+// caughtFrameNames names the frames of the panic err carries.
+func caughtFrameNames(t *testing.T, err error) []string {
+	t.Helper()
+
+	p, ok := panics.As(err)
+	require.True(t, ok, "expected a recovered panic")
+
+	return frameNames(t, p)
+}
+
+// topFrameName is the name of the first frame p retained.
+func topFrameName(t *testing.T, p *panics.Panic) string {
+	t.Helper()
+
+	return frameNames(t, p)[0]
+}
 
 // The three shapes below differ in what sits between the deferred function and
 // Recover: nothing, an anonymous closure, or a named //go:noinline helper. The
@@ -105,37 +133,25 @@ func TestCapture_topFrameIsThePanicSiteAtAnyNestingDepth(t *testing.T) {
 	t.Parallel()
 
 	// A bounded scan for gopanic satisfies the shallow shapes above and then quits
-	// past its bound, retaining gopanic and this package's own frames. These
-	// depths straddle the bound of 8 that used to exist, so that failure cannot
-	// hide in the shallow cases.
+	// past its bound, retaining gopanic and this package's own frames. The depths
+	// here spread wide enough that such a bound cannot hide in the shallow cases.
 	for _, depth := range []int{5, 12, 32} {
 		t.Run(fmt.Sprintf("depth %d", depth), func(t *testing.T) {
 			t.Parallel()
 
-			p := deepDefer(depth)
+			names := frameNames(t, deepDefer(depth))
 
-			frame := topFrame(t, p)
-			require.True(t, strings.HasSuffix(frame.Function, ".raise"),
-				"top frame must be the function that called panic, got %q", frame.Function)
+			require.True(t, strings.HasSuffix(names[0], ".raise"),
+				"top frame must be the function that called panic, got %q", names[0])
 			require.NotContains(
 				t,
-				frame.Function,
+				names[0],
 				"gokern/panics.",
 				"the retained stack must not lead with this package's own frames, got %q",
-				frame.Function,
+				names[0],
 			)
-
-			frames := runtime.CallersFrames(p.StackTrace())
-
-			for {
-				current, more := frames.Next()
-				require.NotEqual(t, "runtime.gopanic", current.Function,
-					"gopanic must be trimmed off however deep the recover site is")
-
-				if !more {
-					break
-				}
-			}
+			require.NotContains(t, names, "runtime.gopanic",
+				"gopanic must be trimmed off however deep the recover site is")
 		})
 	}
 }
@@ -153,12 +169,12 @@ func TestCapture_topFrameIsThePanicSite(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			frame := topFrame(t, shape())
+			top := topFrameName(t, shape())
 
-			require.False(t, strings.HasPrefix(frame.Function, "runtime."),
-				"top frame must not be runtime internals, got %q", frame.Function)
-			require.True(t, strings.HasSuffix(frame.Function, ".raise"),
-				"top frame must be the function that called panic, got %q", frame.Function)
+			require.False(t, strings.HasPrefix(top, "runtime."),
+				"top frame must not be runtime internals, got %q", top)
+			require.True(t, strings.HasSuffix(top, ".raise"),
+				"top frame must be the function that called panic, got %q", top)
 		})
 	}
 }
@@ -166,24 +182,195 @@ func TestCapture_topFrameIsThePanicSite(t *testing.T) {
 func TestCapture_neverRetainsGopanic(t *testing.T) {
 	t.Parallel()
 
-	p := directDefer()
-	require.NotNil(t, p)
-
-	frames := runtime.CallersFrames(p.StackTrace())
-
-	for {
-		frame, more := frames.Next()
-		require.NotEqual(t, "runtime.gopanic", frame.Function,
-			"gopanic must be trimmed off the retained stack")
-
-		if !more {
-			break
-		}
-	}
+	require.NotContains(t, frameNames(t, directDefer()), "runtime.gopanic",
+		"gopanic must be trimmed off the retained stack")
 }
 
 func TestRecover_nilReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	require.Nil(t, panics.Recover(nil))
+}
+
+// The bottom trim is the mirror of the gopanic trim at the top: where that one
+// drops the runtime's way in, this one drops our way out. What survives is the
+// panic's own story and nothing else.
+func TestCapture_stopsAtTheContainmentBoundary(t *testing.T) {
+	t.Parallel()
+
+	t.Run("Catch retains only the panic's own frames", func(t *testing.T) {
+		t.Parallel()
+
+		// Pinned as an exact list rather than as an absence: this is the shape
+		// where every frame the trim should have removed can be named, so
+		// asserting the whole of what is left says more than ruling frames out
+		// one at a time.
+		require.Equal(t,
+			[]string{"github.com/gokern/panics_test.raise"},
+			caughtFrameNames(t, panics.Catch(raise)),
+			"Catch calls raise directly, so raise is the whole story")
+	})
+
+	t.Run("no machinery of ours survives", func(t *testing.T) {
+		t.Parallel()
+
+		names := caughtFrameNames(t, panics.Catch(func() { raiseAtDepth(3) }))
+
+		// Counted, not pattern-matched. A leaked frame here would be the closure
+		// Catch defers, and the check below cannot see one: the compiler names a
+		// closure after whoever called it, so it carries the caller's package and
+		// not ours. Its spelling is no help either. The same closure resolves as
+		// "…TestName.Catch.func3" from a test body and "…TestName.func1.Catch.2"
+		// from inside a t.Run, so any marker drawn from it is a guess about the
+		// compiler. The number of frames that belong here does not move.
+		require.Len(t, names, 5,
+			"four raiseAtDepth frames and the closure that called them, and nothing else")
+
+		for _, name := range names[:4] {
+			require.Equal(t, "github.com/gokern/panics_test.raiseAtDepth", name,
+				"the panic's own frames come first and unbroken")
+		}
+
+		for _, name := range names {
+			require.NotContains(t, name, "gokern/panics.",
+				"a frame of the containment machinery reached the caller")
+		}
+	})
+}
+
+func TestRecover_hasNoContainmentBoundary(t *testing.T) {
+	t.Parallel()
+
+	// Nothing of ours sits below the panic site here, so there is no boundary to
+	// find and the whole stack is kept. Documented, not an oversight: only the
+	// caller knows where their guard begins.
+	var p *panics.Panic
+
+	func() {
+		defer func() { p = panics.Recover(recover()) }()
+
+		raise()
+	}()
+
+	require.Greater(t, len(frameNames(t, p)), 1,
+		"an unassisted Recover has no boundary to trim to")
+}
+
+// The capture window is finite and the boundary sits below every frame the panic
+// unwound through, so a long enough chain pushes the boundary off the end and the
+// bottom trim finds nothing to cut. What would have been trimmed is exactly what
+// did not fit, so the stack comes back short of the boundary rather than running
+// past it.
+func TestCapture_aPanicDeeperThanTheWindowIsTruncatedNotLeaked(t *testing.T) {
+	t.Parallel()
+
+	// No assertion here about testing.tRunner or runtime.goexit: 200 frames of
+	// recursion overflow the window long before it reaches them, so ruling them
+	// out would hold against any implementation, correct or not. What is left
+	// after the window truncates is all this shape can speak to.
+	names := caughtFrameNames(t, panics.Catch(func() { raiseAtDepth(200) }))
+
+	for _, name := range names {
+		require.NotContains(t, name, "gokern/panics.",
+			"the window ran out before the boundary, so no frame of ours can be here")
+	}
+
+	require.Equal(t, "github.com/gokern/panics_test.raiseAtDepth", names[len(names)-1],
+		"the window ran out mid-unwind, so the last frame is still the panicking recursion")
+}
+
+// The window bounds how deep the recover site can be, not just how deep the panic
+// is: every frame between the deferred function and Recover is one the capture
+// has to hold before it reaches gopanic. Past that the panic site is outside the
+// capture, and this package cannot reconstruct that stack. It must not return an
+// empty one either. gopanic landing in the last slot used to produce exactly
+// that: a *Panic reporting a panic and carrying no evidence of it.
+func TestCapture_aDeepRecoverSiteStillCarriesFrames(t *testing.T) {
+	t.Parallel()
+
+	// Swept rather than sampled at the depth that broke, because that depth is a
+	// property of maxFrames and of how many frames the compiler gives each level.
+	// Pin it and the test pins the build instead of the behaviour. frameNames
+	// fails on an empty stack, so the sweep asserts as it goes.
+	var alone bool
+
+	for nesting := 1; nesting <= 128; nesting++ {
+		names := frameNames(t, deepDefer(nesting))
+
+		if len(names) == 1 {
+			require.True(t, strings.HasSuffix(names[0], ".raise"),
+				"the one frame left must be the panic site, got %q", names[0])
+
+			alone = true
+		}
+	}
+
+	// Somewhere in that sweep the window holds the panic site and nothing else.
+	// Passing through that point says the fallback waits until the panic site is
+	// genuinely outside the window. Give up one frame early and the retained count
+	// jumps from two straight to the whole window, never landing on one.
+	require.True(t, alone,
+		"the trim must hold until only the panic site is left, not give up a frame early")
+}
+
+// A nil callback faults inside this package's own closure, so the panic site and
+// the containment boundary are one frame. Trimming there leaves the runtime's
+// fault frames and nothing that says who passed the nil, so the bottom trim
+// stands down and the whole stack is kept.
+func TestCapture_aPanicInsideTheGuardKeepsTheWholeStack(t *testing.T) {
+	t.Parallel()
+
+	// Both built here rather than inside the subtests, so the frame that has to
+	// survive is this function's and not a subtest closure's.
+	caught := map[string]error{
+		"Catch":      panics.Catch(nil),
+		"CatchError": panics.CatchError(nil),
+	}
+
+	const passedTheNil = "github.com/gokern/panics_test." +
+		"TestCapture_aPanicInsideTheGuardKeepsTheWholeStack"
+
+	for name, err := range caught {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			require.Contains(t, caughtFrameNames(t, err), passedTheNil,
+				"the only frame naming whoever passed the nil must survive")
+		})
+	}
+}
+
+// The stand-down above keys on there being nothing but the runtime above the
+// boundary, and the runtime raises plenty of panics inside a caller's own code.
+// Those must still be trimmed, so this is what stops the rule from widening into
+// "any panic that leads with a runtime frame".
+func TestCapture_aRuntimePanicInCallerCodeIsStillTrimmed(t *testing.T) {
+	t.Parallel()
+
+	// Keyed by the fixture's own name, so the last assertion can say which frame
+	// it expects to find rather than merely that something of the caller's is
+	// there.
+	faults := map[string]func(){
+		"raiseIndexOutOfRange": raiseIndexOutOfRange,
+		"raiseNilMapWrite":     raiseNilMapWrite,
+		"raiseDivideByZero":    raiseDivideByZero,
+	}
+
+	for name, fault := range faults {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			names := caughtFrameNames(t, panics.Catch(fault))
+
+			for _, frame := range names {
+				require.NotContains(t, frame, "gokern/panics.",
+					"the fault is the caller's, so the trim must still run")
+			}
+
+			require.NotContains(t, names, "testing.tRunner",
+				"the caller's stack is below the boundary and must not survive")
+			require.Equal(t, "github.com/gokern/panics_test."+name, names[len(names)-1],
+				"the frame that faulted is the deepest thing the panic unwound through")
+		})
+	}
 }

@@ -1,4 +1,4 @@
-package panics //nolint:testpackage // white-box: exercises Panic's unexported stack field.
+package panics // white-box: exercises Panic's unexported stack field.
 
 import (
 	"errors"
@@ -15,7 +15,7 @@ const boom = "boom"
 // to walk every link of one before it can answer false.
 var errUnrelated = errors.New("unrelated")
 
-func TestPanic_Error(t *testing.T) {
+func TestPanic_ErrorRendersTheValue(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]struct {
@@ -37,7 +37,7 @@ func TestPanic_Error(t *testing.T) {
 	}
 }
 
-func TestPanic_StructValueStaysReadable(t *testing.T) {
+func TestPanic_structValueStaysReadable(t *testing.T) {
 	t.Parallel()
 
 	// %#v spelling of a composite is the runtime's business, not this
@@ -92,7 +92,7 @@ func TestPanic_UnwrapReachesTheCause(t *testing.T) {
 	require.ErrorIs(t, p, sentinel, "the panic value's own chain must survive")
 }
 
-func TestPanic_TypedNilCauseIsNotUnwrapped(t *testing.T) {
+func TestPanic_typedNilCauseIsNotUnwrapped(t *testing.T) {
 	t.Parallel()
 
 	p := &Panic{Value: (*os.PathError)(nil)}
@@ -132,7 +132,7 @@ type goStringPanics struct{}
 
 func (goStringPanics) GoString() string { panic("GoString") }
 
-func TestPanic_RenderingAMisbehavingValueDoesNotPanic(t *testing.T) {
+func TestPanic_renderingAMisbehavingValueDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
 	// The crash this prevents lands wherever the error is rendered: a log call,
@@ -166,7 +166,7 @@ func TestPanic_RenderingAMisbehavingValueDoesNotPanic(t *testing.T) {
 	require.EqualError(t, &Panic{Value: errors.New("ordinary")}, "panic: ordinary")
 }
 
-func TestPanic_NilReceiverMethodsAreSafe(t *testing.T) {
+func TestPanic_nilReceiverMethodsAreSafe(t *testing.T) {
 	t.Parallel()
 
 	// A typed-nil *Panic needs nothing more exotic than
@@ -184,7 +184,7 @@ func TestPanic_NilReceiverMethodsAreSafe(t *testing.T) {
 	require.Nil(t, p.StackTrace(), "a nil Panic carries no frames")
 }
 
-func TestPanic_NilReceiverSurvivesErrorsIs(t *testing.T) {
+func TestPanic_nilReceiverSurvivesErrorsIs(t *testing.T) {
 	t.Parallel()
 
 	// Worse than the As trap: without the guard, errors.Is(err, anything) panics
@@ -204,7 +204,7 @@ func TestPanic_NilReceiverSurvivesErrorsIs(t *testing.T) {
 	require.NotErrorIs(t, wrapped, errUnrelated)
 }
 
-func TestPanic_TypedNilKinds(t *testing.T) {
+func TestPanic_typedNilRendersForEveryNilableKind(t *testing.T) {
 	t.Parallel()
 
 	// Every nilable kind that can satisfy error. reflect.Value.IsNil panics
