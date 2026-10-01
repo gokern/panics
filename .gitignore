@@ -6,11 +6,6 @@
 !/.golangci.yaml
 !/.github/
 
-# Agent state, at any depth. The rules above only deny dotdirs at the top of
-# the tree, so one under a subdirectory stays untracked-but-committable —
-# which is how agent state ends up inside a published module.
-**/.omc/
-
 # Go build / test artifacts
 *.exe
 *.test
@@ -26,3 +21,12 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Assistant working files that live in this tree but are not part of the module
+CLAUDE.md
+docs/superpowers/
+**/.claude/
+**/.superpowers/
+
+# Local mise overrides: user-specific tool/task tweaks, never part of the module
+/mise.local.toml
