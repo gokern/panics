@@ -24,7 +24,7 @@ Run on 2026-08-18.
 go test ./... -bench . -benchtime 1s -timeout 0 -run=XXX -cpu 1 -benchmem
 ```
 
-which is `make bench`. Twelve times against `711970a`, which carries the
+which is `mise run bench`. Twelve times against `711970a`, which carries the
 containment trim, and twelve against `5ba617c`, the commit before it landed,
 alternating between the two so that a machine drifting under load drifts through
 both. Compared with `benchstat`; every row below is `p < 0.05` over `n = 12`
@@ -113,8 +113,8 @@ sed -n '/^\/\/ raiseAtDepth calls itself/,/^}/p' fixtures_test.go \
     | cat <(printf 'package panics_test\n\n') - > ../panics-before/depth_test.go
 
 for i in $(seq 1 12); do
-    (cd ../panics-before && make bench) >> before.txt
-    make bench >> after.txt
+    (cd ../panics-before && make bench) >> before.txt   # the baseline checkout keeps its Makefile
+    mise run bench >> after.txt
 done
 
 benchstat before.txt after.txt
